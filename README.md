@@ -1,3 +1,6 @@
+[![CI](https://github.com/kylemillerbuilds/agent-guardrails/actions/workflows/ci.yml/badge.svg)](https://github.com/kylemillerbuilds/agent-guardrails/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 # agent-guardrails
 
 Safety rails for running AI coding agents on a workspace you actually care about. A fail-open PreToolUse hook for Claude Code, seven written rules, and a regression test matrix. Every piece exists because skipping it cost me something real.
