@@ -5,6 +5,10 @@
 
 Safety rails for running AI coding agents on a workspace you actually care about. A fail-open PreToolUse hook for Claude Code, seven written rules, and a regression test matrix. Every piece exists because skipping it cost me something real.
 
+<p align="center">
+  <img src="diagram.svg" alt="How agent-guardrails judges a command before it runs" width="840">
+</p>
+
 ## The story
 
 I run multiple AI agents against production code: a CLI agent, an IDE agent, and a paired notes vault, all sharing one working tree. One day an agent decided to use git worktrees. The IDE tried to index thousands of duplicated files and died for an entire day.
