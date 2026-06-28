@@ -40,7 +40,21 @@ The guard blocks three classes of mistake and warns on a fourth:
 
 **Heredoc stripping.** The expensive false positive: a Python heredoc containing `var mv := Camera.new()` next to the string `"scripts/core/foo.gd"` reads to a naive scanner as `mv` touching a protected `scripts/` directory. The guard strips heredoc bodies before scanning for rm/mv, while converting newlines to `;` so a real `rm -rf scripts/x` on its own script line still blocks. That fix is most of the complexity in the file, and it's tested in both directions.
 
-**Tests before wiring.** `test_guard.sh` feeds synthetic hook payloads to the guard and asserts BLOCK or ALLOW for 50+ cases, including every false positive that ever happened. The rule: the matrix runs green before any guard edit ships.
+**Tests before wiring.** `test_guard.sh` feeds synthetic hook payloads to the guard and asserts BLOCK or ALLOW for 60+ cases, including every false positive that ever happened. The rule: the matrix runs green before any guard edit ships.
+
+## Example
+
+When the guard fires, it returns a deny decision with the reason:
+
+```
+$ git add -A
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+"permissionDecisionReason":"Blocked by Rule 2: no broad 'git add' (-A / --all / bare '.').
+Stage specific named files instead (git add path/to/file) — a shared tree often carries
+dirty files from parallel sessions. See rules/02-no-broad-git-adds.md."}}
+```
+
+The agent sees the reason and stops. No prompt needed from you.
 
 ## Install
 
