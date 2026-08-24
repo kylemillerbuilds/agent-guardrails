@@ -22,7 +22,7 @@ You can tell an agent the rules in its instructions file, and you should. But in
 ```
 guard.sh          the PreToolUse hook (bash, no dependencies beyond python3)
 test_guard.sh     regression matrix; run it green before changing the guard
-rules/            the seven rules, with the why behind each one
+rules/            the eight rules, with the why behind each one
 ```
 
 The guard blocks three classes of mistake, warns on a fourth, and gates a fifth that is not a mistake at all:
