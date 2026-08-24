@@ -11,6 +11,19 @@
 #            Heredoc bodies are skipped, and rm/mv must begin a command
 #            (not a substring / var name like `var mv :=`).
 #   Rule 4 — WARN (non-blocking) on `launchctl load` of a plist.
+#   Rule 8 — outbound egress allowlist for curl/wget. THE ODD ONE OUT: its
+#            decision fails CLOSED. Configurable via GUARD_EGRESS_ALLOW.
+#
+# TWO FAMILIES, OPPOSITE FAILURE PHILOSOPHIES. Rules 1-4 guard against the agent
+# being clumsy, and clumsiness is not adversarial: a guard that blocks a
+# legitimate command is worse than the mistake it prevents, so they fail open.
+# Rule 8 guards against the agent being LIED TO. Everything an agent reads
+# through a tool - a web page, an email body, a file another agent wrote, text
+# inside an image - is authored by someone else and can carry instructions aimed
+# at the agent. The payoff for a landed injection is almost always exfiltration,
+# and outbound network is the chokepoint. So Rule 8's decision fails closed: an
+# unlisted destination never passes silently. Do not merge the two families when
+# editing this file; the asymmetry is the design.
 #
 # FAIL-OPEN: any parse error, missing dependency, regex problem, or unmatched
 # input exits 0 with no output -> the tool proceeds (status quo). This hook is
@@ -39,6 +52,12 @@ _json_str() {                # minimal JSON string escaping for the reason
 
 deny() {                     # $1 = reason shown to the agent
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\n' \
+    "$(_json_str "$1")"
+  exit 0
+}
+
+ask() {                      # $1 = reason - surfaces a permission prompt to the human
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":%s}}\n' \
     "$(_json_str "$1")"
   exit 0
 }
@@ -134,6 +153,94 @@ re_launchload='(^|[;&|[:space:]])launchctl[[:space:]]+load'
 if [[ "$CMD" =~ $re_launchload ]]; then
   printf 'Rule 4: launchctl load detected. Background processes (KeepAlive/StartInterval) need explicit human approval first. Proceeding (warn-only) — confirm this was approved. See rules/04-no-background-daemons.md.\n' 1>&2
   allow
+fi
+
+# --- Rule 8: outbound network egress (the fail-CLOSED rule) ----------------
+# See the header for why this one is different. Three outcomes:
+#   deny  - a download piped into an interpreter (remote code execution), ALWAYS,
+#           even for an allowlisted host; and an upload flag aimed at an
+#           unlisted host, which is the exfiltration shape itself.
+#   ask   - any other curl/wget touching an unlisted host, and the case where no
+#           literal URL is readable. The human sees the host and decides.
+#   allow - every literal host in the command is allowlisted.
+#
+# Host matching is EXACT, or a leading-dot suffix for wildcard entries. This is
+# why the check PARSES hosts instead of stripping known-good substrings: a URL
+# whose host merely BEGINS with an allowlisted name (allowed-host DOT attacker
+# DOT com) must not satisfy that entry, and a substring strip would let it
+# straight through. If you re-implement this, that is the bug you will write.
+#
+# HONEST LIMITS - be aware of them rather than trusting the rule past them:
+#   1. Only Bash. Write/Edit/WebFetch and MCP tools never reach this hook.
+#   2. Only URLs literally present in the command. A first-party script makes its
+#      own calls that this never sees.
+#   3. Only exfiltration by network. Nothing about an injection that corrupts
+#      data in place or talks the agent into reporting something false.
+#   4. NO HEREDOC STRIPPING, unlike Rule 3. A heredoc body that merely discusses
+#      an upload flag next to an unlisted URL - documentation, a test fixture,
+#      this very comment - reads as the real thing and triggers an ask or a deny.
+#      Found by writing the patch that added this rule, which the rule then
+#      blocked. Fail-closed means accepting false positives; that is the trade
+#      the other four rules deliberately refuse to make.
+#
+# The default list is deliberately minimal: package registries, GitHub, and the
+# model APIs. Set GUARD_EGRESS_ALLOW to your own space-separated list; add a host
+# only after asking what reaches it and who controls what it serves.
+EGRESS_ALLOW="${GUARD_EGRESS_ALLOW:-localhost 127.0.0.1 ::1 api.github.com github.com raw.githubusercontent.com objects.githubusercontent.com pypi.org files.pythonhosted.org registry.npmjs.org api.anthropic.com api.openai.com}"
+
+re_netcmd='(^[[:space:]]*|[;&|(`$][[:space:]]*)(curl|wget)([[:space:]]|$)'
+re_pipe_shell='(curl|wget)[^;&]*\|[[:space:]]*(sudo[[:space:]]+)?(bash|sh|zsh|ksh|fish|python3?|perl|ruby|node|osascript)([[:space:]]|$|\|)'
+re_upload='([[:space:]](-d|-F|-T)[[:space:]=]|--data(-binary|-raw|-urlencode)?[[:space:]=]|--form[[:space:]=]|--upload-file[[:space:]=]|--post-data[[:space:]=]|--post-file[[:space:]=]|-X[[:space:]]+(POST|PUT|PATCH))'
+
+if [[ "$CMD" =~ $re_netcmd ]]; then
+  # THE TRAP FLIPS FOR THIS SECTION. The file-wide `trap allow ERR` would swallow
+  # an error raised inside this evaluation into a silent allow, which would make
+  # the fail-closed claim false. For the length of this block, an unexpected
+  # error is a DENY. Restored to fail-open immediately after, because every other
+  # rule here belongs to the fail-open family and must stay there.
+  _egress_error_deny() {
+    deny "Blocked by Rule 8: the egress check itself errored, so the allowlist was never applied. Rule 8's decision fails CLOSED by design - an unverifiable network call is refused rather than waved through. Re-run it yourself if you know the destination."
+  }
+  trap '_egress_error_deny' ERR
+
+  # Remote code execution is denied regardless of host: an allowlisted domain can
+  # still serve an attacker-controlled file (a gist, a PR branch, a bucket).
+  if [[ "$CMD" =~ $re_pipe_shell ]]; then
+    deny "Blocked by Rule 8: refusing to pipe a download straight into an interpreter. This is the classic remote-code-execution shape and it is denied even for allowlisted hosts, because a trusted domain can still serve an attacker-controlled file. Download to a file, read it, then run it deliberately. See rules/08-outbound-egress-allowlist.md."
+  fi
+
+  # Walk every literal http(s) host in the command; collect the unlisted ones.
+  _rest_urls="$CMD"
+  _unlisted=""
+  _sawurl=0
+  while [[ "$_rest_urls" =~ https?://([A-Za-z0-9._:-]+) ]]; do
+    _sawurl=1
+    _host="${BASH_REMATCH[1]%%:*}"
+    _match=0
+    for _d in $EGRESS_ALLOW; do
+      case "$_d" in
+        .*) if [[ "$_host" == *"$_d" ]]; then _match=1; fi ;;
+        *)  if [[ "$_host" == "$_d" ]]; then _match=1; fi ;;
+      esac
+    done
+    if [ "$_match" = 0 ]; then
+      _unlisted="${_unlisted:+$_unlisted, }$_host"
+    fi
+    _rest_urls="${_rest_urls#*"${BASH_REMATCH[0]}"}"
+  done
+
+  if [ -n "$_unlisted" ]; then
+    # An upload flag pointed at an unlisted host IS the exfiltration shape.
+    if [[ "$CMD" =~ $re_upload ]]; then
+      deny "Blocked by Rule 8: refusing to SEND data to a non-allowlisted host ($_unlisted). An upload flag (-d/--data/-F/-T/--upload-file/-X POST) aimed at an unknown domain is the exfiltration shape a prompt injection would use. If this is legitimate, run it yourself, or add the host to GUARD_EGRESS_ALLOW deliberately. See rules/08-outbound-egress-allowlist.md."
+    fi
+    ask "Rule 8 (egress): this reaches a host that is not on the allowlist - $_unlisted. Approve only if you recognise it and expected this call. Content the agent read (a web page, an email, a file another agent wrote) can name a destination; the allowlist is what keeps that from being acted on silently. See rules/08-outbound-egress-allowlist.md."
+  fi
+
+  if [ "$_sawurl" = 0 ]; then
+    ask "Rule 8 (egress): a curl/wget with no readable literal URL - the destination is built at runtime (a variable, a shell substitution), so the allowlist cannot be checked statically. Approve only if you know where this points. See rules/08-outbound-egress-allowlist.md."
+  fi
+  trap 'allow' ERR   # back to the fail-open family
 fi
 
 allow

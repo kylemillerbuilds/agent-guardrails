@@ -3,7 +3,7 @@
 
 # agent-guardrails
 
-Safety rails for running AI coding agents on a workspace you actually care about. A fail-open PreToolUse hook for Claude Code, seven written rules, and a regression test matrix. Every piece exists because skipping it cost me something real.
+Safety rails for running AI coding agents on a workspace you actually care about. A PreToolUse hook for Claude Code, eight written rules, and a regression test matrix. Seven of the rules exist because skipping them cost me something real. The eighth exists because the other seven all assume the agent is merely careless.
 
 <p align="center">
   <img src="diagram.svg" alt="How agent-guardrails judges a command before it runs" width="840">
@@ -25,22 +25,58 @@ test_guard.sh     regression matrix; run it green before changing the guard
 rules/            the seven rules, with the why behind each one
 ```
 
-The guard blocks three classes of mistake and warns on a fourth:
+The guard blocks three classes of mistake, warns on a fourth, and gates a fifth that is not a mistake at all:
 
 1. **Git worktrees and branch creation.** Hidden work is invisible to every tool indexing the live tree.
 2. **Broad git adds** (`git add -A` / `.` / `--all`, `git commit -a`). Blanket staging on a shared tree commits things nobody intended.
 3. **`rm`/`mv` touching protected directories.** Configurable via `GUARD_PROTECTED_DIRS`. An agent doing "cleanup" will eventually decide something important is clutter.
 4. **`launchctl load`** gets a warning, not a block. Background daemons need a human yes.
+5. **Outbound `curl`/`wget` to a host that is not allowlisted.** Unlisted host asks; an upload flag
+   at an unlisted host blocks; a download piped into an interpreter blocks even for an allowlisted
+   host. Configure with `GUARD_EGRESS_ALLOW`.
 
 ## Design decisions that matter
 
-**Fail-open, always.** Any parse error, missing dependency, or unmatched input allows the command. The hook is shared across concurrent sessions, so a buggy guard must never be able to freeze a parallel chat. A guard that can break your workflow gets deleted within a week. A guard that only ever blocks explicit, matched dangerous patterns gets to stay forever.
+**Fail-open for seven rules. Fail-closed for one.** This is the design decision I would defend
+hardest, because the two halves contradict each other on purpose.
+
+Rules 1 through 7 catch me being clumsy. Clumsiness is not adversarial: it does not adapt, it does
+not try again through another door, and it is not trying to look like legitimate work. So those
+rules fail open. Any parse error, missing dependency, or unmatched input allows the command. A guard
+that can freeze a parallel session gets deleted within a week, and a deleted guard protects nothing.
+
+Rule 8 catches me being lied to. Everything an agent reads through a tool is written by someone
+else, and any of it can carry instructions aimed at the agent. The payoff for a landed injection is
+almost always exfiltration, which needs an outbound network call, which makes outbound network the
+chokepoint. Against an adversary, "allow when unsure" is the whole vulnerability. So Rule 8's
+decision fails closed, and the hook flips its own `ERR` trap for the length of that block, because
+the file-wide `trap allow ERR` would otherwise swallow an error inside the egress check into a
+silent allow and make the claim false.
+
+The cost is real and I am not going to hide it. Rule 8 has no heredoc stripping, so a heredoc that
+merely *discusses* an upload flag next to an unlisted URL trips it. I found that out when the patch
+adding Rule 8 to this repo was blocked by Rule 8 already running on my machine, because the patch
+text contained an example spoofed URL beside the literal string `-d`. Fail-closed means accepting
+false positives. That is exactly the trade the other seven rules refuse to make, and it is why only
+one rule gets to make it.
+
+**Fail-open, always, for the other seven.** Any parse error, missing dependency, or unmatched input allows the command. The hook is shared across concurrent sessions, so a buggy guard must never be able to freeze a parallel chat. A guard that can break your workflow gets deleted within a week. A guard that only ever blocks explicit, matched dangerous patterns gets to stay forever.
 
 **Command-start anchoring.** The naive regex blocks `git commit -m "stop using git add -A"`, which is a commit message *about* the rule. The guard requires the dangerous invocation to actually begin a command (start of string or right after `;` `&` `|` `(`). Trade-off: an env-prefixed `FOO=bar git add .` slips through. Fail-open means accepting rare misses to guarantee zero false positives.
 
 **Heredoc stripping.** The expensive false positive: a Python heredoc containing `var mv := Camera.new()` next to the string `"scripts/core/foo.gd"` reads to a naive scanner as `mv` touching a protected `scripts/` directory. The guard strips heredoc bodies before scanning for rm/mv, while converting newlines to `;` so a real `rm -rf scripts/x` on its own script line still blocks. That fix is most of the complexity in the file, and it's tested in both directions.
 
-**Tests before wiring.** `test_guard.sh` feeds synthetic hook payloads to the guard and asserts BLOCK or ALLOW for 60+ cases, including every false positive that ever happened. The rule: the matrix runs green before any guard edit ships.
+**Tests before wiring.** `test_guard.sh` feeds synthetic hook payloads to the guard and asserts
+BLOCK, ASK, or ALLOW for 80+ cases, including every false positive that ever happened. Three
+verdicts rather than two, because a harness that cannot tell "refused" from "asked a human" would
+score Rule 8 as passing while it silently waved things through.
+
+The matrix runs green before any guard edit ships, and green on its own is not evidence. Before
+trusting the Rule 8 cases I broke the guard on purpose twice: replacing exact host matching with a
+substring check (one case fails, the spoofed-host one) and disabling the pipe-to-interpreter check
+(four cases fail). A test you have never watched turn red is a test you have not verified. The
+single most valuable case in the file is the spoofed host whose name merely *begins* with an
+allowlisted domain, because that is the bug anyone "simplifying" the matching will write.
 
 ## Example
 
