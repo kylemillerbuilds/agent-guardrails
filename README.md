@@ -132,7 +132,7 @@ Full write-ups with the incident behind each rule: [rules/](rules/).
 
 Kyle Miller. I build AI systems that run real businesses: e-commerce automation, internal tools, content engines. This repo is a piece of my actual operating setup, extracted and cleaned up. The business logic stays home.
 
-**Hire me:** [themisfoundry.com](https://themisfoundry.com)
+[themisfoundry.com](https://themisfoundry.com)
 
 ## License
 
