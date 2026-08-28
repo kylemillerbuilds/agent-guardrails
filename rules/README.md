@@ -1,10 +1,10 @@
 # The rules
 
-Eight rules for running AI coding agents on a workspace you care about. Seven of them exist because skipping it cost something real: a broken IDE, a bloated repo, a fabricated "done." The eighth exists because the others all assume the agent is merely careless, and one of them has to assume it is being lied to.
+Nine rules for running AI coding agents on a workspace you care about. Seven of them exist because skipping it cost something real: a broken IDE, a bloated repo, a fabricated "done." The last two exist because the others all assume the agent is merely careless, and something has to assume it is being lied to.
 
 - **Canonical copy:** your agent's always-loaded instructions file (CLAUDE.md or equivalent) should carry a terse copy. These files are the long version with the *why*.
-- **Enforced subset:** `../guard.sh` (a PreToolUse hook) enforces rules 1-3 and 8 before a tool call runs, and warns on rule 4. Rules 5-7 are honor-system.
-- **Two failure philosophies.** Rules 1-7 fail OPEN: they catch clumsiness, and a guard that blocks legitimate work gets deleted within a week. Rule 8 faces an adversary, so its decision fails CLOSED. Keep them apart when editing the hook.
+- **Enforced subset:** `../guard.sh` (a PreToolUse hook) enforces rules 1-3, 8 and 9 before a tool call runs, and warns on rule 4. Rules 5-7 are honor-system.
+- **Two failure philosophies.** Rules 1-7 fail OPEN: they catch clumsiness, and a guard that blocks legitimate work gets deleted within a week. Rules 8 and 9 face an adversary, so their decisions fail CLOSED. Keep the two families apart when editing the hook.
 - If the two copies ever drift, the always-loaded copy wins.
 
 | # | Rule | Enforcement |
