@@ -3,7 +3,7 @@
 
 # agent-guardrails
 
-Safety rails for running AI coding agents on a workspace you actually care about. A PreToolUse hook for Claude Code, eight written rules, and a regression test matrix. Seven of the rules exist because skipping them cost me something real. The eighth exists because the other seven all assume the agent is merely careless.
+Safety rails for running AI coding agents on a workspace you actually care about. A PreToolUse hook for Claude Code, nine written rules, and a regression test matrix. Seven of the rules exist because skipping them cost me something real. The last two exist because the other seven all assume the agent is merely careless rather than lied to.
 
 <p align="center">
   <img src="diagram.svg" alt="How agent-guardrails judges a command before it runs" width="840">
@@ -22,7 +22,7 @@ You can tell an agent the rules in its instructions file, and you should. But in
 ```
 guard.sh          the PreToolUse hook (bash, no dependencies beyond python3)
 test_guard.sh     regression matrix; run it green before changing the guard
-rules/            the eight rules, with the why behind each one
+rules/            the nine rules, with the why behind each one
 ```
 
 The guard blocks three classes of mistake, warns on a fourth, and gates a fifth that is not a mistake at all:
@@ -37,7 +37,7 @@ The guard blocks three classes of mistake, warns on a fourth, and gates a fifth 
 
 ## Design decisions that matter
 
-**Fail-open for seven rules. Fail-closed for one.** This is the design decision I would defend
+**Fail-open for seven rules. Fail-closed for two.** This is the design decision I would defend
 hardest, because the two halves contradict each other on purpose.
 
 Rules 1 through 7 catch me being clumsy. Clumsiness is not adversarial: it does not adapt, it does
@@ -45,7 +45,7 @@ not try again through another door, and it is not trying to look like legitimate
 rules fail open. Any parse error, missing dependency, or unmatched input allows the command. A guard
 that can freeze a parallel session gets deleted within a week, and a deleted guard protects nothing.
 
-Rule 8 catches me being lied to. Everything an agent reads through a tool is written by someone
+Rules 8 and 9 catch me being lied to. Everything an agent reads through a tool is written by someone
 else, and any of it can carry instructions aimed at the agent. The payoff for a landed injection is
 almost always exfiltration, which needs an outbound network call, which makes outbound network the
 chokepoint. Against an adversary, "allow when unsure" is the whole vulnerability. So Rule 8's
